@@ -98,7 +98,7 @@ class ViconModule(mp_module.MPModule):
         # vicon_pos = self.vicon.get_segment_global_translation(object_name, segment_name)
 
         # position is x (forward) y (left) z (up)
-        rigid_body = self.vicon.rigidBodyByName(object_name)
+        rigid_body = self.vicon.rigidBodies.get(object_name)
         if rigid_body is None:
             # Object is not in view
             return None, None, None, None
