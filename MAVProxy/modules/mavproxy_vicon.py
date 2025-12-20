@@ -110,7 +110,8 @@ class ViconModule(mp_module.MPModule):
         # vicon_quat = Quaternion(self.vicon.get_segment_global_quaternion(object_name, segment_name))
         vicon_quat = rigid_body.rotation
 
-        pos_ned = Vector3(vicon_pos * 0.001)
+        # pos_ned = Vector3(vicon_pos * 0.001)
+        pos_ned = Vector3(vicon_pos)
         # euler = vicon_quat.euler
         euler = quaternion_to_euler(vicon_quat.x, -vicon_quat.y, -vicon_quat.z, vicon_quat.w)
         roll, pitch, yaw = euler[0], euler[1], euler[2]
