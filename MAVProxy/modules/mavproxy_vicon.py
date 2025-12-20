@@ -5,6 +5,7 @@ use vicon data to provide VISION_POSITION_ESTIMATE and GPS_INPUT data
 import math
 import threading
 import time
+import numpy as np
 
 from MAVProxy.modules.lib import mp_module
 from MAVProxy.modules.lib import mp_settings
@@ -15,7 +16,27 @@ from pymavlink.quaternion import Quaternion
 from pymavlink import mavutil
 from pymavlink import mavextra
 
-from pyvicon import pyvicon
+# from pyvicon import pyvicon
+import motioncapture
+
+
+def quaternion_to_euler(x, y, z, w):
+    # roll (x-axis rotation)
+    sinr_cosp = 2 * (w * x + y * z)
+    cosr_cosp = 1 - 2 * (x * x + y * y)
+    roll = math.atan2(sinr_cosp, cosr_cosp)
+
+    # pitch (y-axis rotation)
+    sinp = math.sqrt(1 + 2 * (w * y - x * z))
+    cosp = math.sqrt(1 - 2 * (w * y - x * z))
+    pitch = 2 * math.atan2(sinp, cosp) - math.pi / 2
+
+    # yaw (z-axis rotation)
+    siny_cosp = 2 * (w * z + x * y)
+    cosy_cosp = 1 - 2 * (y * y + z * z)
+    yaw = math.atan2(siny_cosp, cosy_cosp)
+
+    return [roll, pitch, yaw]
 
 
 class ViconModule(mp_module.MPModule):
@@ -54,34 +75,44 @@ class ViconModule(mp_module.MPModule):
         self.actual_frame_rate = 0.0
 
     def detect_vicon_object(self):
-        self.vicon.get_frame()
+        # self.vicon.get_frame()
+        self.vicon.waitForNextFrame()
         object_name = self.vicon_settings.object_name
         if object_name is None:
             # We haven't specified which object we are looking for, so just find the first one
-            object_name = self.vicon.get_subject_name(0)
+            object_name = next(iter(self.vicon.rigidBodies), None)
         if object_name is None:
             # No objects found
             return None, None
-        segment_name = self.vicon.get_subject_root_segment_name(object_name)
-        if segment_name is None:
+        # segment_name = self.vicon.get_subject_root_segment_name(object_name)
+        segment_name = object_name
+        # if segment_name is None:
             # Object we're looking for can't be found
-            return None, None
+            # return None, None
         print("Connected to subject '%s' segment '%s'" % (object_name, segment_name))
         return object_name, segment_name
 
     def get_vicon_pose(self, object_name, segment_name):
 
         # get position in mm. Coordinates are in NED
-        vicon_pos = self.vicon.get_segment_global_translation(object_name, segment_name)
+        # vicon_pos = self.vicon.get_segment_global_translation(object_name, segment_name)
 
-        if vicon_pos is None:
+        # position is x (forward) y (left) z (up)
+        rigid_body = self.vicon.rigidBodyByName(object_name)
+        if rigid_body is None:
             # Object is not in view
             return None, None, None, None
 
-        vicon_quat = Quaternion(self.vicon.get_segment_global_quaternion(object_name, segment_name))
+        vicon_pos = rigid_body.position
+        forward, left, up = vicon_pos
+        vicon_pos = np.array([forward, -left, -up])  # NED
+
+        # vicon_quat = Quaternion(self.vicon.get_segment_global_quaternion(object_name, segment_name))
+        vicon_quat = rigid_body.rotation
 
         pos_ned = Vector3(vicon_pos * 0.001)
-        euler = vicon_quat.euler
+        # euler = vicon_quat.euler
+        euler = quaternion_to_euler(vicon_quat.x, -vicon_quat.y, -vicon_quat.z, vicon_quat.w)
         roll, pitch, yaw = euler[0], euler[1], euler[2]
         yaw = math.radians(mavextra.wrap_360(math.degrees(yaw)))
 
@@ -94,6 +125,7 @@ class ViconModule(mp_module.MPModule):
         last_pos = None
         last_frame_num = None
         frame_count = 0
+        frame_num = 0
 
         while True:
             if self.vicon is None:
@@ -110,7 +142,8 @@ class ViconModule(mp_module.MPModule):
                 last_origin_send = now
                 now_ms = int(now * 1000)
                 last_gps_send_ms = now_ms
-                frame_rate = self.vicon.get_frame_rate()
+                # frame_rate = self.vicon.get_frame_rate()
+                frame_rate = 100
                 frame_dt = 1.0/frame_rate
                 last_rate = time.time()
                 frame_count = 0
@@ -119,11 +152,13 @@ class ViconModule(mp_module.MPModule):
             if self.vicon_settings.gps_rate > 0:
                 gps_period_ms = 1000 // self.vicon_settings.gps_rate
             time.sleep(0.01)
-            self.vicon.get_frame()
+            # self.vicon.get_frame()
+            self.vicon.waitForNextFrame()
             mav = self.master
             now = time.time()
             now_ms = int(now * 1000)
-            frame_num = self.vicon.get_frame_number()
+            frame_num += 1
+            # frame_num = self.vicon.get_frame_number()
 
             frame_count += 1
             if now - last_rate > 0.1:
@@ -217,19 +252,21 @@ class ViconModule(mp_module.MPModule):
 
     def cmd_start(self):
         """start vicon"""
-        vicon = pyvicon.PyVicon()
+        # remove pyvicon dependency
+        # vicon = pyvicon.PyVicon()
         print("Opening Vicon connection to %s" % self.vicon_settings.host)
-        vicon.connect(self.vicon_settings.host)
-        print("Configuring vicon")
-        vicon.set_stream_mode(pyvicon.StreamMode.ClientPull)
-        vicon.enable_marker_data()
-        vicon.enable_segment_data()
-        vicon.enable_unlabeled_marker_data()
-        vicon.enable_device_data()
+        vicon = motioncapture.connect("vicon", {'hostname': self.vicon_settings.host})
+        # vicon.connect(self.vicon_settings.host)
+        # print("Configuring vicon")
+        # vicon.set_stream_mode(pyvicon.StreamMode.ClientPull)
+        # vicon.enable_marker_data()
+        # vicon.enable_segment_data()
+        # vicon.enable_unlabeled_marker_data()
+        # vicon.enable_device_data()
 
         # Set the axis mapping to the ardupilot convention (North, East, Down)
-        vicon.set_axis_mapping(pyvicon.Direction.Forward, pyvicon.Direction.Right, pyvicon.Direction.Down)
-        print(vicon.get_axis_mapping())
+        # vicon.set_axis_mapping(pyvicon.Direction.Forward, pyvicon.Direction.Right, pyvicon.Direction.Down)
+        # print(vicon.get_axis_mapping())
         print("vicon ready")
         self.vicon = vicon
 
