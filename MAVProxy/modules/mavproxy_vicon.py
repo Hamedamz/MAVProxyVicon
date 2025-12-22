@@ -270,7 +270,7 @@ class ViconModule(mp_module.MPModule):
         # remove pyvicon dependency
         # vicon = pyvicon.PyVicon()
         print("Opening Vicon connection to %s" % self.vicon_settings.host)
-        vicon = motioncapture.connect("vicon", {'hostname': self.vicon_settings.host, enablePointcloud:True})
+        vicon = motioncapture.connect("vicon", {'hostname': self.vicon_settings.host, 'enablePointcloud': True})
         # vicon.connect(self.vicon_settings.host)
         # print("Configuring vicon")
         # vicon.set_stream_mode(pyvicon.StreamMode.ClientPull)
