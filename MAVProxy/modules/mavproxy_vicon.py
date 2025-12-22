@@ -181,7 +181,7 @@ class ViconModule(mp_module.MPModule):
                 self.vel_filter.set_cutoff_frequency(self.actual_frame_rate, self.vicon_settings.vel_filter_hz)
 
             # pos_ned, roll, pitch, yaw = self.get_vicon_pose(object_name, segment_name)
-            pos_ned, roll, pitch, yaw = np.array([0.0,0.0,0.0], 0, 0, 0)
+            pos_ned, roll, pitch, yaw = np.array([0.0,0.0,0.0]), 0, 0, 0
 
             self.get_vicon_pose_pointcloud()
             if pos_ned is None:
