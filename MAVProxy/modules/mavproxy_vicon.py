@@ -20,6 +20,20 @@ from pymavlink import mavextra
 import motioncapture
 
 
+def find_closest_cpu(points, query_point):
+    # 1. Vectorized Subtraction (allocates new array, but fast)
+    diff = points - query_point
+
+    # 2. Square and Sum (No Sqrt!)
+    # axis=1 sums across x,y,z
+    dist_sq = np.einsum('ij,ij->i', diff, diff)
+    # OR: dist_sq = np.sum(diff**2, axis=1) # Slightly slower than einsum usually
+
+    # 3. Argmin
+    min_idx = np.argmin(dist_sq)
+
+    return min_idx
+
 def quaternion_to_euler(x, y, z, w):
     # roll (x-axis rotation)
     sinr_cosp = 2 * (w * x + y * z)
@@ -128,7 +142,16 @@ class ViconModule(mp_module.MPModule):
 
     def get_vicon_pose_pointcloud(self):
         pointcloud = self.vicon.pointCloud
-        print(pointcloud)
+
+        closest_point_idx = find_closest_point(pointcloud, self.last_position)
+        vicon_pos = pointcloud[closest_point_idx]
+        self.last_position = vicon_pos
+
+        forward, left, up = vicon_pos
+        vicon_pos = np.array([forward, -left, -up])  # NED
+        pos_ned = Vector3(vicon_pos)  # position in meter
+
+        return pos_ned, float('nan'), float('nan'), float('nan')
 
     def thread_loop(self):
         """background processing"""
@@ -181,9 +204,9 @@ class ViconModule(mp_module.MPModule):
                 self.vel_filter.set_cutoff_frequency(self.actual_frame_rate, self.vicon_settings.vel_filter_hz)
 
             # pos_ned, roll, pitch, yaw = self.get_vicon_pose(object_name, segment_name)
-            pos_ned, roll, pitch, yaw = np.array([0.0,0.0,0.0]), 0, 0, 0
 
-            self.get_vicon_pose_pointcloud()
+            pos_ned, roll, pitch, yaw = self.get_vicon_pose_pointcloud()
+
             if pos_ned is None:
                 continue
             
