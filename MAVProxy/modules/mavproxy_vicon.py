@@ -54,7 +54,10 @@ class ViconModule(mp_module.MPModule):
              ('vel_filter_hz', float, 30.0),
              ('gps_rate', int, 5),
              ('gps_nsats', float, 16),
-             ('object_name', str, None)
+             ('object_name', str, None),
+             ('init_x', float, 0.0),
+             ('init_y', float, 0.0),
+             ('init_z', float, 0.0)
              ])
         self.add_command('vicon', self.cmd_vicon, 'VICON control',
                          ["<start>",
@@ -73,6 +76,7 @@ class ViconModule(mp_module.MPModule):
         self.last_frame_count = 0
         self.vel_filter = LowPassFilter2p.LowPassFilter2p(200.0, 30.0)
         self.actual_frame_rate = 0.0
+        self.last_position = np.array([0.0, 0.0, 0.0])
 
     def detect_vicon_object(self):
         # self.vicon.get_frame()
@@ -90,6 +94,9 @@ class ViconModule(mp_module.MPModule):
             # Object we're looking for can't be found
             # return None, None
         print("Connected to subject '%s' segment '%s'" % (object_name, segment_name))
+
+        self.last_position = np.array([self.vicon_settings.init_x, self.vicon_settings.init_y, self.vicon_settings.init_z])
+
         return object_name, segment_name
 
     def get_vicon_pose(self, object_name, segment_name):
@@ -111,13 +118,17 @@ class ViconModule(mp_module.MPModule):
         vicon_quat = rigid_body.rotation
 
         # pos_ned = Vector3(vicon_pos * 0.001)
-        pos_ned = Vector3(vicon_pos)
+        pos_ned = Vector3(vicon_pos)  # position in meter
         # euler = vicon_quat.euler
         euler = quaternion_to_euler(vicon_quat.x, -vicon_quat.y, -vicon_quat.z, vicon_quat.w)
         roll, pitch, yaw = euler[0], euler[1], euler[2]
         yaw = math.radians(mavextra.wrap_360(math.degrees(yaw)))
 
         return pos_ned, roll, pitch, yaw
+
+    def get_vicon_pose_pointcloud(self):
+        pointcloud = self.vicon.pointCloud()
+        print(pointcloud)
 
     def thread_loop(self):
         """background processing"""
@@ -170,6 +181,8 @@ class ViconModule(mp_module.MPModule):
                 self.vel_filter.set_cutoff_frequency(self.actual_frame_rate, self.vicon_settings.vel_filter_hz)
 
             pos_ned, roll, pitch, yaw = self.get_vicon_pose(object_name, segment_name)
+
+            self.get_vicon_pose_pointcloud()
             if pos_ned is None:
                 continue
             
