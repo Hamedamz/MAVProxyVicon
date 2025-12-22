@@ -24,7 +24,6 @@ def find_closest_cpu(points, query_point):
     # 1. Vectorized Subtraction (allocates new array, but fast)
     diff = points - query_point
 
-    # 2. Square and Sum (No Sqrt!)
     # axis=1 sums across x,y,z
     dist_sq = np.einsum('ij,ij->i', diff, diff)
     # OR: dist_sq = np.sum(diff**2, axis=1) # Slightly slower than einsum usually
@@ -143,7 +142,11 @@ class ViconModule(mp_module.MPModule):
     def get_vicon_pose_pointcloud(self):
         pointcloud = self.vicon.pointCloud
 
-        closest_point_idx = find_closest_point(pointcloud, self.last_position)
+        if pointcloud is None or len(pointcloud) == 0:
+            # Object is not in view
+            return None, None, None, None
+
+        closest_point_idx = find_closest_cpu(pointcloud, self.last_position)
         vicon_pos = pointcloud[closest_point_idx]
         self.last_position = vicon_pos
 
