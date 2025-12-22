@@ -127,7 +127,7 @@ class ViconModule(mp_module.MPModule):
         return pos_ned, roll, pitch, yaw
 
     def get_vicon_pose_pointcloud(self):
-        pointcloud = self.vicon.pointCloud()
+        pointcloud = self.vicon.pointCloud
         print(pointcloud)
 
     def thread_loop(self):
