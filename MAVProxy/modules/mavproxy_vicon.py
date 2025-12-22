@@ -145,21 +145,21 @@ class ViconModule(mp_module.MPModule):
                 object_name = None
                 continue
 
-            if not object_name:
-                object_name, segment_name = self.detect_vicon_object()
-                if object_name is None:
-                    continue
-                last_msg_time = time.time()
-                now = time.time()
-                last_origin_send = now
-                now_ms = int(now * 1000)
-                last_gps_send_ms = now_ms
-                # frame_rate = self.vicon.get_frame_rate()
-                frame_rate = 100
-                frame_dt = 1.0/frame_rate
-                last_rate = time.time()
-                frame_count = 0
-                print("Vicon frame rate %.1f" % frame_rate)
+            # if not object_name:
+            #     object_name, segment_name = self.detect_vicon_object()
+            #     if object_name is None:
+            #         continue
+            #     last_msg_time = time.time()
+            #     now = time.time()
+            #     last_origin_send = now
+            #     now_ms = int(now * 1000)
+            #     last_gps_send_ms = now_ms
+            #     # frame_rate = self.vicon.get_frame_rate()
+            #     frame_rate = 100
+            #     frame_dt = 1.0/frame_rate
+            #     last_rate = time.time()
+            #     frame_count = 0
+            #     print("Vicon frame rate %.1f" % frame_rate)
 
             if self.vicon_settings.gps_rate > 0:
                 gps_period_ms = 1000 // self.vicon_settings.gps_rate
@@ -180,7 +180,8 @@ class ViconModule(mp_module.MPModule):
                 frame_count = 0
                 self.vel_filter.set_cutoff_frequency(self.actual_frame_rate, self.vicon_settings.vel_filter_hz)
 
-            pos_ned, roll, pitch, yaw = self.get_vicon_pose(object_name, segment_name)
+            # pos_ned, roll, pitch, yaw = self.get_vicon_pose(object_name, segment_name)
+            pos_ned, roll, pitch, yaw = np.array([0.0,0.0,0.0], 0, 0, 0)
 
             self.get_vicon_pose_pointcloud()
             if pos_ned is None:
