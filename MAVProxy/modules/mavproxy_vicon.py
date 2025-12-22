@@ -291,7 +291,7 @@ class ViconModule(mp_module.MPModule):
                                gps_vel.x, gps_vel.y, gps_vel.z,
                                0.2, 1.0, 1.0,
                                self.vicon_settings.gps_nsats,
-                               yaw_cd)
+                               0)
 
     def cmd_start(self):
         """start vicon"""
