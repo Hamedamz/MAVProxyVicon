@@ -281,17 +281,22 @@ class ViconModule(mp_module.MPModule):
             fix_type = 3
         else:
             fix_type = 1
-        yaw_cd = int(mavextra.wrap_360(math.degrees(yaw)) * 100)
-        if yaw_cd == 0:
-            # the yaw extension to GPS_INPUT uses 0 as no yaw support
-            yaw_cd = 36000
+
+        if yaw is float('nan'):
+            yaw_cd = 0
+        else:
+            yaw_cd = int(mavextra.wrap_360(math.degrees(yaw)) * 100)
+            if yaw_cd == 0:
+                # the yaw extension to GPS_INPUT uses 0 as no yaw support
+                yaw_cd = 36000
+
         self.master.mav.gps_input_send(time_us, 0, 0, gps_week_ms, gps_week, fix_type,
                                int(gps_lat * 1.0e7), int(gps_lon * 1.0e7), gps_alt,
                                1.0, 1.0,
                                gps_vel.x, gps_vel.y, gps_vel.z,
                                0.2, 1.0, 1.0,
                                self.vicon_settings.gps_nsats,
-                               0)
+                               yaw_cd)
 
     def cmd_start(self):
         """start vicon"""
