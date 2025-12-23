@@ -47,7 +47,7 @@ def matrix_to_vicon_format(pose_matrix):
 
 
 # Fast Nearest Neighbor Search (Numba Optimized)
-@njit(fastmath=True)
+# @njit(fastmath=True)
 def find_correspondences(model_points_transformed, scene_cloud, max_dist_sq):
     """
     For each model point, find the closest point in the scene cloud.
