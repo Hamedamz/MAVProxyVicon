@@ -19,6 +19,174 @@ from pymavlink import mavextra
 # from pyvicon import pyvicon
 import motioncapture
 
+import numpy as np
+
+
+def matrix_to_vicon_format(pose_matrix):
+    """
+    Converts a 4x4 Transformation Matrix to Vicon format:
+    Translation: [X, Y, Z]
+    Rotation:    [qX, qY, qZ, qW]
+    """
+    # 1. Extract Translation (Column 3, Rows 0-2)
+    # Vicon usually streams in Millimeters by default.
+    # If your tracker logic (previous code) was in Meters,
+    # you might need to multiply by 1000 if you want exact Vicon scaling.
+    translation = pose_matrix[:3, 3]
+
+    # 2. Extract Rotation Matrix (3x3 top-left)
+    rot_matrix = pose_matrix[:3, :3]
+
+    # 3. Convert to Quaternion
+    # Scipy's as_quat() returns [x, y, z, w] (Scalar Last)
+    # This matches the standard Vicon DataStream SDK convention.
+    r = sciR.from_matrix(rot_matrix)
+    quat = r.as_quat()
+
+    return translation, quat
+
+
+# Fast Nearest Neighbor Search (Numba Optimized)
+@njit(fastmath=True)
+def find_correspondences(model_points_transformed, scene_cloud, max_dist_sq):
+    """
+    For each model point, find the closest point in the scene cloud.
+    Includes 'Gating': ignores correspondences further than max_dist.
+    """
+    n_model = model_points_transformed.shape[0]
+    n_scene = scene_cloud.shape[0]
+
+    # Arrays to store the matches
+    # src = model points (transformed), dst = found scene points
+    src_matches = np.zeros((n_model, 3), dtype=np.float32)
+    dst_matches = np.zeros((n_model, 3), dtype=np.float32)
+    valid_mask = np.zeros(n_model, dtype=np.bool_)
+
+    match_count = 0
+
+    for i in range(n_model):
+        qx, qy, qz = model_points_transformed[i]
+
+        best_dist_sq = np.inf
+        best_idx = -1
+
+        # Brute force search (fastest for dynamic clouds on CPU)
+        for j in range(n_scene):
+            dx = scene_cloud[j, 0] - qx
+            dy = scene_cloud[j, 1] - qy
+            dz = scene_cloud[j, 2] - qz
+            dist_sq = dx * dx + dy * dy + dz * dz
+
+            if dist_sq < best_dist_sq:
+                best_dist_sq = dist_sq
+                best_idx = j
+
+        # GATING: Only accept if within reasonable distance
+        if best_idx != -1 and best_dist_sq < max_dist_sq:
+            src_matches[match_count] = model_points_transformed[i]
+            dst_matches[match_count] = scene_cloud[best_idx]
+            valid_mask[match_count] = True
+            match_count += 1
+
+    return src_matches[:match_count], dst_matches[:match_count], match_count
+
+
+# Rigid Body Alignment (Kabsch Algorithm)
+def solve_kabsch(P, Q):
+    """
+    Finds optimal Rotation (R) and Translation (t) such that Q approx = R*P + t
+    P: Source points (Nx3)
+    Q: Target points (Nx3)
+    """
+    # 1. Compute centroids
+    centroid_P = np.mean(P, axis=0)
+    centroid_Q = np.mean(Q, axis=0)
+
+    # 2. Center the points
+    P_centered = P - centroid_P
+    Q_centered = Q - centroid_Q
+
+    # 3. Compute Covariance Matrix
+    H = P_centered.T @ Q_centered
+
+    # 4. SVD
+    U, S, Vt = np.linalg.svd(H)
+
+    # 5. Compute Rotation
+    R = Vt.T @ U.T
+
+    # 6. Handle Reflection case (determinant must be +1)
+    if np.linalg.det(R) < 0:
+        Vt[2, :] *= -1
+        R = Vt.T @ U.T
+
+    # 7. Compute Translation
+    t = centroid_Q - R @ centroid_P
+
+    return R, t
+
+
+# The Tracker Class
+class RigidBodyTracker:
+    def __init__(self, marker_pattern):
+        """
+        marker_pattern: (4x3) numpy array of marker positions in OBJECT frame
+        """
+        self.model_local = marker_pattern.astype(np.float32)
+
+        # Current Pose Estimate (4x4 Transformation Matrix)
+        self.pose = np.eye(4, dtype=np.float32)
+
+    def set_initial_pose(self, transform_matrix):
+        self.pose = transform_matrix.astype(np.float32)
+
+    def track(self, scene_cloud, max_dist=0.1, iterations=5):
+        """
+        Refines the pose based on the new scene cloud.
+        scene_cloud: (Nx3) numpy array
+        max_dist: Maximum distance (meters) to search for a marker.
+                  Acts as a filter against other objects.
+        """
+        scene_cloud = scene_cloud.astype(np.float32)
+        max_dist_sq = max_dist ** 2
+
+        for _ in range(iterations):
+            # 1. Transform Model Points to World using current Pose Estimate
+            # R * p + t
+            curr_R = self.pose[:3, :3]
+            curr_t = self.pose[:3, 3]
+
+            # (4x3) transformed points
+            model_world = (curr_R @ self.model_local.T).T + curr_t
+
+            # 2. Find Correspondences (Association)
+            # We treat 'model_world' as the query points to find in 'scene_cloud'
+            src_pts, dst_pts, n_matches = find_correspondences(
+                model_world, scene_cloud, max_dist_sq
+            )
+
+            # 3. Check for tracking loss
+            # We need at least 3 points to resolve 3D orientation uniquely
+            if n_matches < 3:
+                # Keep old pose, but warn (or return status)
+                print("Warning: Tracking lost (not enough markers found)")
+                break
+
+                # 4. Compute Correction (Drift)
+            # We want to move 'src_pts' (current estimate) to 'dst_pts' (observation)
+            R_delta, t_delta = solve_kabsch(src_pts, dst_pts)
+
+            # 5. Update Pose
+            # New_Pose = Delta * Old_Pose
+            # Construct Delta Matrix
+            Delta = np.eye(4, dtype=np.float32)
+            Delta[:3, :3] = R_delta
+            Delta[:3, 3] = t_delta
+
+            self.pose = Delta @ self.pose
+
+        return self.pose
+
 
 def find_closest_cpu(points, query_point):
     # 1. Vectorized Subtraction (allocates new array, but fast)
@@ -70,7 +238,8 @@ class ViconModule(mp_module.MPModule):
              ('object_name', str, None),
              ('init_x', float, 0.0),
              ('init_y', float, 0.0),
-             ('init_z', float, 0.0)
+             ('init_z', float, 0.0),
+             ('mode', str, "unique_marker"), # same_marker, single_marker, unique_marker
              ])
         self.add_command('vicon', self.cmd_vicon, 'VICON control',
                          ["<start>",
@@ -90,6 +259,9 @@ class ViconModule(mp_module.MPModule):
         self.vel_filter = LowPassFilter2p.LowPassFilter2p(200.0, 30.0)
         self.actual_frame_rate = 0.0
         self.last_position = np.array([0.0, 0.0, 0.0])
+        self.last_pose = np.eye(4)
+        self.tracker = None
+        self.pose_function = None
 
     def detect_vicon_object(self):
         # self.vicon.get_frame()
@@ -108,15 +280,9 @@ class ViconModule(mp_module.MPModule):
             # return None, None
         print("Connected to subject '%s' segment '%s'" % (object_name, segment_name))
 
-        self.last_position = np.array([self.vicon_settings.init_x, self.vicon_settings.init_y, self.vicon_settings.init_z])
-
         return object_name, segment_name
 
-    def get_vicon_pose(self, object_name, segment_name):
-
-        # get position in mm. Coordinates are in NED
-        # vicon_pos = self.vicon.get_segment_global_translation(object_name, segment_name)
-
+    def get_vicon_pose(self, object_name):
         # position is x (forward) y (left) z (up)
         rigid_body = self.vicon.rigidBodies.get(object_name)
         if rigid_body is None:
@@ -126,20 +292,16 @@ class ViconModule(mp_module.MPModule):
         vicon_pos = rigid_body.position
         forward, left, up = vicon_pos
         vicon_pos = np.array([forward, -left, -up])  # NED
-
-        # vicon_quat = Quaternion(self.vicon.get_segment_global_quaternion(object_name, segment_name))
         vicon_quat = rigid_body.rotation
 
-        # pos_ned = Vector3(vicon_pos * 0.001)
         pos_ned = Vector3(vicon_pos)  # position in meter
-        # euler = vicon_quat.euler
         euler = quaternion_to_euler(vicon_quat.x, -vicon_quat.y, -vicon_quat.z, vicon_quat.w)
         roll, pitch, yaw = euler[0], euler[1], euler[2]
         yaw = math.radians(mavextra.wrap_360(math.degrees(yaw)))
 
         return pos_ned, roll, pitch, yaw
 
-    def get_vicon_pose_pointcloud(self):
+    def get_vicon_translation_pointcloud(self, object_name):
         pointcloud = self.vicon.pointCloud
 
         if pointcloud is None or len(pointcloud) == 0:
@@ -156,8 +318,55 @@ class ViconModule(mp_module.MPModule):
 
         return pos_ned, float('nan'), float('nan'), float('nan')
 
+    def get_vicon_pose_pointcloud(self, object_name):
+        pointcloud = self.vicon.pointCloud
+
+        if pointcloud is None or len(pointcloud) == 0:
+            # Object is not in view
+            return None, None, None, None
+
+        tracker.set_initial_pose(self.last_pose)
+        estimated_pose = tracker.track(pointcloud, max_dist=0.2)
+        self.last_pose = estimated_pose
+
+        vicon_pos, vicon_quat = matrix_to_vicon_format(estimated_pose)
+        self.last_position = vicon_pos
+
+        forward, left, up = vicon_pos
+        vicon_pos = np.array([forward, -left, -up])  # NED
+        pos_ned = Vector3(vicon_pos)  # position in meter
+
+        euler = quaternion_to_euler(vicon_quat[0], -vicon_quat[1], -vicon_quat[2], vicon_quat[3])
+        roll, pitch, yaw = euler[0], euler[1], euler[2]
+        yaw = math.radians(mavextra.wrap_360(math.degrees(yaw)))
+
+        return pos_ned, roll, pitch, yaw
+
     def thread_loop(self):
         """background processing"""
+        if self.vicon_settings.mode == "single_marker":
+            self.last_position = np.array(
+                [self.vicon_settings.init_x, self.vicon_settings.init_y, self.vicon_settings.init_z])
+            self.pose_function = self.get_vicon_translation_pointcloud
+        elif self.vicon_settings.mode == "same_marker":
+            from numba import njit
+            from scipy.spatial.transform import Rotation as sciR
+
+            markers = np.array([
+                [0.00, -0.035, 0.00],
+                [0.035, 0.00, 0.00],
+                [0.00, 0.035, 0.00],
+                [-0.005, 0.005, 0.00]
+            ], dtype=np.float32)
+            self.tracker = RigidBodyTracker(markers)
+            self.last_pose = np.eye(4)
+            self.last_pose[0, 3] = self.last_position[0]
+            self.last_pose[1, 3] = self.last_position[1]
+            self.last_pose[2, 3] = self.last_position[2]
+            self.pose_function = self.get_vicon_pose_pointcloud
+        else:
+            self.pose_function = self.get_vicon_pose
+
         object_name = None
         segment_name = None
         last_pos = None
@@ -208,7 +417,8 @@ class ViconModule(mp_module.MPModule):
 
             # pos_ned, roll, pitch, yaw = self.get_vicon_pose(object_name, segment_name)
 
-            pos_ned, roll, pitch, yaw = self.get_vicon_pose_pointcloud()
+            # pos_ned, roll, pitch, yaw = self.get_vicon_translation_pointcloud()
+            pos_ned, roll, pitch, yaw = self.pose_function(object_name)
 
             if pos_ned is None:
                 continue
