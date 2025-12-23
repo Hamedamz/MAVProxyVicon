@@ -418,7 +418,7 @@ class ViconModule(mp_module.MPModule):
             # pos_ned, roll, pitch, yaw = self.get_vicon_pose(object_name, segment_name)
 
             # pos_ned, roll, pitch, yaw = self.get_vicon_translation_pointcloud()
-            pos_ned, roll, pitch, yaw = self.pose_function(object_name)
+            pos_ned, roll, pitch, yaw = self.get_vicon_pose(object_name)
 
             if pos_ned is None:
                 continue
