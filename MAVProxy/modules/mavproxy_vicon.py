@@ -148,7 +148,6 @@ class ViconModule(mp_module.MPModule):
 
         closest_idx = find_closest_cpu(pointcloud, self.last_position)
         vicon_pos = pointcloud[closest_idx]
-        print(pointcloud)
         self.last_position = vicon_pos
 
         forward, left, up = vicon_pos
