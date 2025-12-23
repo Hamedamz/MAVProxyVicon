@@ -146,8 +146,9 @@ class ViconModule(mp_module.MPModule):
             # Object is not in view
             return None, None, None, None
 
-        closest_point_idx = find_closest_cpu(pointcloud, self.last_position)
-        vicon_pos = pointcloud[closest_point_idx]
+        closest_idx = find_closest_cpu(pointcloud, self.last_position)
+        vicon_pos = pointcloud[closest_idx]
+        print(pointcloud)
         self.last_position = vicon_pos
 
         forward, left, up = vicon_pos
