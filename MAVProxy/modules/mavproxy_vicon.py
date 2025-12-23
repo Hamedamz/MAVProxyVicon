@@ -282,7 +282,7 @@ class ViconModule(mp_module.MPModule):
         else:
             fix_type = 1
 
-        if yaw is float('nan'):
+        if math.isnan(yaw):
             yaw_cd = 0
         else:
             yaw_cd = int(mavextra.wrap_360(math.degrees(yaw)) * 100)
