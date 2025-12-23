@@ -26,3 +26,10 @@ Lead Developers: Andrew Tridgell and Peter Barker
 Windows Maintainer: Stephen Dade
 
 MacOS Maintainer: Rhys Mainwaring
+
+sudo apt-get install libgtk-3-dev
+python3 -m pip install --user pathlib2 matplotlib
+
+python setup.py build install
+
+mavproxy.py --master=/dev/ttyAMA0 --baudrate=921600 --out=udp:192.168.1.230:14550
