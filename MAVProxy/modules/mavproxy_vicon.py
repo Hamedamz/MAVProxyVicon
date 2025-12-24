@@ -6,6 +6,7 @@ import math
 import threading
 import time
 import numpy as np
+import json
 
 from MAVProxy.modules.lib import mp_module
 from MAVProxy.modules.lib import mp_settings
@@ -236,6 +237,7 @@ class ViconModule(mp_module.MPModule):
              ('gps_rate', int, 5),
              ('gps_nsats', float, 16),
              ('object_name', str, None),
+             ('save_init_pos', str, None),
              ('init_x', float, 0.0),
              ('init_y', float, 0.0),
              ('init_z', float, 0.0),
@@ -278,6 +280,14 @@ class ViconModule(mp_module.MPModule):
         # if segment_name is None:
             # Object we're looking for can't be found
             # return None, None
+
+        if self.vicon_settings.save_init_pos:
+            rigid_body = self.vicon.rigidBodies.get(object_name)
+            vicon_pos = rigid_body.position
+            x, y, z = vicon_pos
+            with open(self.vicon_settings.save_init_pos, "w") as f:
+                json.dump([x, y, z], f)
+
         print("Connected to subject '%s' segment '%s'" % (object_name, segment_name))
 
         return object_name, segment_name
