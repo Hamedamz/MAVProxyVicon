@@ -286,7 +286,7 @@ class ViconModule(mp_module.MPModule):
             vicon_pos = rigid_body.position
             x, y, z = vicon_pos
             with open(self.vicon_settings.save_init_pos, "w") as f:
-                json.dump([x, y, z], f)
+                json.dump([float(x), float(y), float(z)], f)
                 print(f"Initial coords saved to {self.vicon_settings.save_init_pos}")
 
         print("Connected to subject '%s' segment '%s'" % (object_name, segment_name))
