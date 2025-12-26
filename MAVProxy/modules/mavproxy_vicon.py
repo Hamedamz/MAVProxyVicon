@@ -238,6 +238,7 @@ class ViconModule(mp_module.MPModule):
              ('gps_nsats', float, 16),
              ('object_name', str, None),
              ('save_init_pos', str, None),
+             ('save_pos_log', str, None),
              ('init_x', float, 0.0),
              ('init_y', float, 0.0),
              ('init_z', float, 0.0),
@@ -264,6 +265,7 @@ class ViconModule(mp_module.MPModule):
         self.last_pose = np.eye(4)
         self.tracker = None
         self.pose_function = None
+        self.pos_log = []
 
     def detect_vicon_object(self):
         # self.vicon.get_frame()
@@ -309,6 +311,13 @@ class ViconModule(mp_module.MPModule):
         euler = quaternion_to_euler(vicon_quat.x, -vicon_quat.y, -vicon_quat.z, vicon_quat.w)
         roll, pitch, yaw = euler[0], euler[1], euler[2]
         yaw = math.radians(mavextra.wrap_360(math.degrees(yaw)))
+
+        # self.pos_log.append({
+        #     "frame_id": 0,
+        #     "tvec": [float(forward), float(left), float(up)],
+        #     "qvec": [float(vicon_quat.x), float(vicon_quat.y), float(vicon_quat.z), float(vicon_quat.w)],
+        #     "time": 0
+        # })
 
         return pos_ned, roll, pitch, yaw
 
@@ -385,108 +394,118 @@ class ViconModule(mp_module.MPModule):
         frame_count = 0
         frame_num = 0
 
-        while True:
-            if self.vicon is None:
-                time.sleep(0.1)
-                object_name = None
-                continue
-
-            if not object_name:
-                object_name, segment_name = self.detect_vicon_object()
-                if object_name is None:
+        try:
+            while True:
+                if self.vicon is None:
+                    time.sleep(0.1)
+                    object_name = None
                     continue
-                last_msg_time = time.time()
+
+                if not object_name:
+                    object_name, segment_name = self.detect_vicon_object()
+                    if object_name is None:
+                        continue
+                    last_msg_time = time.time()
+                    now = time.time()
+                    last_origin_send = now
+                    now_ms = int(now * 1000)
+                    last_gps_send_ms = now_ms
+                    # frame_rate = self.vicon.get_frame_rate()
+                    frame_rate = 100
+                    frame_dt = 1.0/frame_rate
+                    last_rate = time.time()
+                    frame_count = 0
+                    print("Vicon frame rate %.1f" % frame_rate)
+
+                if self.vicon_settings.gps_rate > 0:
+                    gps_period_ms = 1000 // self.vicon_settings.gps_rate
+                time.sleep(0.01)
+                # self.vicon.get_frame()
+                self.vicon.waitForNextFrame()
+                mav = self.master
                 now = time.time()
-                last_origin_send = now
                 now_ms = int(now * 1000)
-                last_gps_send_ms = now_ms
-                # frame_rate = self.vicon.get_frame_rate()
-                frame_rate = 100
-                frame_dt = 1.0/frame_rate
-                last_rate = time.time()
-                frame_count = 0
-                print("Vicon frame rate %.1f" % frame_rate)
+                frame_num += 1
+                # frame_num = self.vicon.get_frame_number()
 
-            if self.vicon_settings.gps_rate > 0:
-                gps_period_ms = 1000 // self.vicon_settings.gps_rate
-            time.sleep(0.01)
-            # self.vicon.get_frame()
-            self.vicon.waitForNextFrame()
-            mav = self.master
-            now = time.time()
-            now_ms = int(now * 1000)
-            frame_num += 1
-            # frame_num = self.vicon.get_frame_number()
+                frame_count += 1
+                if now - last_rate > 0.1:
+                    rate = frame_count / (now - last_rate)
+                    self.actual_frame_rate = 0.9 * self.actual_frame_rate + 0.1 * rate
+                    last_rate = now
+                    frame_count = 0
+                    self.vel_filter.set_cutoff_frequency(self.actual_frame_rate, self.vicon_settings.vel_filter_hz)
 
-            frame_count += 1
-            if now - last_rate > 0.1:
-                rate = frame_count / (now - last_rate)
-                self.actual_frame_rate = 0.9 * self.actual_frame_rate + 0.1 * rate
-                last_rate = now
-                frame_count = 0
-                self.vel_filter.set_cutoff_frequency(self.actual_frame_rate, self.vicon_settings.vel_filter_hz)
+                # pos_ned, roll, pitch, yaw = self.get_vicon_pose(object_name, segment_name)
 
-            # pos_ned, roll, pitch, yaw = self.get_vicon_pose(object_name, segment_name)
+                # pos_ned, roll, pitch, yaw = self.get_vicon_translation_pointcloud()
+                pos_ned, roll, pitch, yaw = self.get_vicon_pose(object_name)
 
-            # pos_ned, roll, pitch, yaw = self.get_vicon_translation_pointcloud()
-            pos_ned, roll, pitch, yaw = self.get_vicon_pose(object_name)
+                # self.pos_log[-1]['time'] = now
+                # self.pos_log[-1]['frame_id'] = frame_num
 
-            if pos_ned is None:
-                continue
-            
-            # print(f"XYZ: {pos_ned.x}, {pos_ned.y}, {pos_ned.z}, ")
-
-            if last_frame_num is None or frame_num - last_frame_num > 100 or frame_num <= last_frame_num:
-                last_frame_num = frame_num
-                last_pos = pos_ned
-                continue
-
-            dt = (frame_num - last_frame_num) * frame_dt
-            vel = (pos_ned - last_pos) * (1.0/dt)
-            last_pos = pos_ned
-            last_frame_num = frame_num
-
-            filtered_vel = self.vel_filter.apply(vel)
-
-            if self.vicon_settings.vision_rate > 0:
-                dt = now - last_msg_time
-                if dt < 1.0 / self.vicon_settings.vision_rate:
+                if pos_ned is None:
                     continue
 
-            last_msg_time = now
+                # print(f"XYZ: {pos_ned.x}, {pos_ned.y}, {pos_ned.z}, ")
 
-            self.pos = pos_ned
-            self.att = [math.degrees(roll), math.degrees(pitch), math.degrees(yaw)]
-            self.frame_count += 1
+                if last_frame_num is None or frame_num - last_frame_num > 100 or frame_num <= last_frame_num:
+                    last_frame_num = frame_num
+                    last_pos = pos_ned
+                    continue
 
-            time_us = int(now * 1.0e6)
+                dt = (frame_num - last_frame_num) * frame_dt
+                vel = (pos_ned - last_pos) * (1.0/dt)
+                last_pos = pos_ned
+                last_frame_num = frame_num
 
-            if now - last_origin_send > 1 and self.vicon_settings.vision_rate > 0:
-                # send a heartbeat msg
-                mav.mav.heartbeat_send(mavutil.mavlink.MAV_TYPE_GCS, mavutil.mavlink.MAV_AUTOPILOT_GENERIC, 0, 0, 0)
+                filtered_vel = self.vel_filter.apply(vel)
 
-                # send origin at 1Hz
-                mav.mav.set_gps_global_origin_send(self.target_system,
-                                                   int(self.vicon_settings.origin_lat*1.0e7),
-                                                   int(self.vicon_settings.origin_lon*1.0e7),
-                                                   int(self.vicon_settings.origin_alt*1.0e3),
-                                                   time_us)
-                last_origin_send = now
+                if self.vicon_settings.vision_rate > 0:
+                    dt = now - last_msg_time
+                    if dt < 1.0 / self.vicon_settings.vision_rate:
+                        continue
 
-            if self.vicon_settings.gps_rate > 0 and now_ms - last_gps_send_ms > gps_period_ms:
-                '''send GPS data at the specified rate, trying to align on the given period'''
-                self.gps_input_send(now, pos_ned, yaw, filtered_vel)
-                last_gps_send_ms = (now_ms//gps_period_ms) * gps_period_ms
-                self.gps_count += 1
+                last_msg_time = now
 
-            if self.vicon_settings.vision_rate > 0:
-                # send VISION_POSITION_ESTIMATE
-                # we force mavlink1 to avoid the covariances which seem to make the packets too large
-                # for the mavesp8266 wifi bridge
-                mav.mav.global_vision_position_estimate_send(time_us,
-                                                             pos_ned.x, pos_ned.y, pos_ned.z,
-                                                             roll, pitch, yaw, force_mavlink1=True)
-                self.vision_count += 1
+                self.pos = pos_ned
+                self.att = [math.degrees(roll), math.degrees(pitch), math.degrees(yaw)]
+                self.frame_count += 1
+
+                time_us = int(now * 1.0e6)
+
+                if now - last_origin_send > 1 and self.vicon_settings.vision_rate > 0:
+                    # send a heartbeat msg
+                    mav.mav.heartbeat_send(mavutil.mavlink.MAV_TYPE_GCS, mavutil.mavlink.MAV_AUTOPILOT_GENERIC, 0, 0, 0)
+
+                    # send origin at 1Hz
+                    mav.mav.set_gps_global_origin_send(self.target_system,
+                                                       int(self.vicon_settings.origin_lat*1.0e7),
+                                                       int(self.vicon_settings.origin_lon*1.0e7),
+                                                       int(self.vicon_settings.origin_alt*1.0e3),
+                                                       time_us)
+                    last_origin_send = now
+
+                if self.vicon_settings.gps_rate > 0 and now_ms - last_gps_send_ms > gps_period_ms:
+                    '''send GPS data at the specified rate, trying to align on the given period'''
+                    self.gps_input_send(now, pos_ned, yaw, filtered_vel)
+                    last_gps_send_ms = (now_ms//gps_period_ms) * gps_period_ms
+                    self.gps_count += 1
+
+                if self.vicon_settings.vision_rate > 0:
+                    # send VISION_POSITION_ESTIMATE
+                    # we force mavlink1 to avoid the covariances which seem to make the packets too large
+                    # for the mavesp8266 wifi bridge
+                    mav.mav.global_vision_position_estimate_send(time_us,
+                                                                 pos_ned.x, pos_ned.y, pos_ned.z,
+                                                                 roll, pitch, yaw, force_mavlink1=True)
+                    self.vision_count += 1
+        finally:
+            if self.vicon_settings.save_pos_log:
+                file_name = os.path.join(self.vicon_settings.save_pos_log, 'vicon_log.json')
+                with open(file_name, "w") as f:
+                    json.dump({"frames": self.pos_log}, f)
+                print(f"Vicon log saved in {file_name}")
 
     def gps_input_send(self, time, pos_ned, yaw, gps_vel):
         time_us = int(time * 1.0e6)
