@@ -314,12 +314,12 @@ class ViconModule(mp_module.MPModule):
         roll, pitch, yaw = euler[0], euler[1], euler[2]
         yaw = math.radians(mavextra.wrap_360(math.degrees(yaw)))
 
-        # self.pos_log.append({
-        #     "frame_id": 0,
-        #     "tvec": [float(forward), float(left), float(up)],
-        #     "qvec": [float(vicon_quat.x), float(vicon_quat.y), float(vicon_quat.z), float(vicon_quat.w)],
-        #     "time": 0
-        # })
+        self.pos_log.append({
+            "frame_id": 0,
+            "tvec": [float(forward), float(left), float(up)],
+            "qvec": [float(vicon_quat.x), float(vicon_quat.y), float(vicon_quat.z), float(vicon_quat.w)],
+            "time": 0
+        })
 
         return pos_ned, roll, pitch, yaw
 
@@ -442,8 +442,8 @@ class ViconModule(mp_module.MPModule):
             # pos_ned, roll, pitch, yaw = self.get_vicon_translation_pointcloud()
             pos_ned, roll, pitch, yaw = self.get_vicon_pose(object_name)
 
-            # self.pos_log[-1]['time'] = now
-            # self.pos_log[-1]['frame_id'] = frame_num
+            self.pos_log[-1]['time'] = now
+            self.pos_log[-1]['frame_id'] = frame_num
 
             if pos_ned is None:
                 continue
