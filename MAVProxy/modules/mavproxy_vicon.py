@@ -240,6 +240,7 @@ class ViconModule(mp_module.MPModule):
              ('object_name', str, None),
              ('save_init_pos', str, None),
              ('save_pos_log', str, None),
+             ('vicon_stop_trigger', str, None),
              ('init_x', float, 0.0),
              ('init_y', float, 0.0),
              ('init_z', float, 0.0),
@@ -572,16 +573,17 @@ class ViconModule(mp_module.MPModule):
 
     def idle_task(self):
         """run on idle"""
-        if os.path.exists("vicon_stop_trigger"):
-            print("Vicon Module: Stop trigger detected!")
-            self.unload()  # Save the data
+        if self.vicon_settings.vicon_stop_trigger:
+            if os.path.exists(self.vicon_settings.vicon_stop_trigger):
+                print("Vicon Module: Stop trigger detected!")
+                self.unload()  # Save the data
 
-            # Remove the trigger file so we don't save twice
-            try:
-                os.remove("vicon_stop_trigger")
-            except:
-                pass
-            return
+                # Remove the trigger file so we don't save twice
+                try:
+                    os.remove(self.vicon_settings.vicon_stop_trigger)
+                except:
+                    pass
+                return
 
         if not self.pos or not self.att or self.frame_count == self.last_frame_count:
             return
