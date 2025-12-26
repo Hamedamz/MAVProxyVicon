@@ -502,7 +502,7 @@ class ViconModule(mp_module.MPModule):
                     self.vision_count += 1
         finally:
             if self.vicon_settings.save_pos_log:
-                file_name = os.path.join(self.vicon_settings.save_pos_log, 'vicon_log.json')
+                file_name = self.vicon_settings.save_pos_log
                 with open(file_name, "w") as f:
                     json.dump({"frames": self.pos_log}, f)
                 print(f"Vicon log saved in {file_name}")
