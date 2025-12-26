@@ -7,6 +7,7 @@ import threading
 import time
 import numpy as np
 import json
+import os
 
 from MAVProxy.modules.lib import mp_module
 from MAVProxy.modules.lib import mp_settings
@@ -571,6 +572,17 @@ class ViconModule(mp_module.MPModule):
 
     def idle_task(self):
         """run on idle"""
+        if os.path.exists("vicon_stop_trigger"):
+            print("Vicon Module: Stop trigger detected!")
+            self.unload()  # Save the data
+
+            # Remove the trigger file so we don't save twice
+            try:
+                os.remove("vicon_stop_trigger")
+            except:
+                pass
+            return
+
         if not self.pos or not self.att or self.frame_count == self.last_frame_count:
             return
         self.last_frame_count = self.frame_count
